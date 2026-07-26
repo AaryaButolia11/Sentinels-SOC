@@ -64,14 +64,29 @@ def _sentence_from_top(top: list[tuple[str, float, float]]) -> str:
     return f"Flagged because this event {phrases[0]}, {phrases[1]}, and {phrases[2]}."
 
 
-def explain_classifier(model, feature_row: dict, feature_names: list[str], top_k: int = 3) -> dict:
+def build_shap_explainer(model):
+    """Build a SHAP TreeExplainer ONCE for a fitted classifier model.
+    Rebuilding this per-event (the old behavior) walks the entire tree
+    ensemble every single call, which is why pre-scoring hundreds of
+    live events at startup could take minutes and never finish. Build
+    it once right after training and reuse it for every event."""
+    import shap
+    return shap.TreeExplainer(model)
+
+
+def explain_classifier(model, feature_row: dict, feature_names: list[str], top_k: int = 3,
+                        explainer=None) -> dict:
     """SHAP explanation for one row scored by the (already fit) attack
     classifier's underlying tree model. `model` should be the fitted
-    LightGBM/GradientBoosting estimator (e.g. clf.model)."""
-    import shap
+    LightGBM/GradientBoosting estimator (e.g. clf.model).
+
+    Pass a pre-built `explainer` (from build_shap_explainer) to avoid
+    rebuilding a TreeExplainer on every call — that rebuild is the
+    expensive part, not the actual value computation."""
+    if explainer is None:
+        explainer = build_shap_explainer(model)
 
     X = pd.DataFrame([feature_row])[feature_names].values.astype(float)
-    explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X)
 
     # Multi-class LightGBM returns a list of arrays (one per class) or a
@@ -123,38 +138,3 @@ def fit_population_stats(feature_rows: list[dict], feature_names: list[str]):
     explain_anomaly()."""
     df = pd.DataFrame(feature_rows)[feature_names]
     return df.mean().to_dict(), df.std().replace(0, 1e-6).to_dict()
-
-
-if __name__ == "__main__":
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "features"))
-    sys.path.insert(0, os.path.dirname(__file__))
-    from features.feature_engineering import build_feature_table, FEATURE_NAMES
-    from models.classifier import AttackClassifier
-    import csv
-    from datetime import datetime
-
-    events = []
-    with open(os.path.join(os.path.dirname(__file__), "..", "data", "sample_logs.csv")) as f:
-        for row in csv.DictReader(f):
-            row["timestamp"] = datetime.fromisoformat(row["timestamp"])
-            row["resource_sensitivity"] = int(row["resource_sensitivity"])
-            row["geo_lat"] = float(row["geo_lat"])
-            row["geo_lon"] = float(row["geo_lon"])
-            row["session_duration_s"] = (
-                int(row["session_duration_s"]) if row["session_duration_s"] not in ("", "None") else None
-            )
-            events.append(row)
-
-    feature_rows, labels, store = build_feature_table(events)
-    clf = AttackClassifier(use_smote=True).fit(feature_rows, labels)
-
-    attack_idx = next(i for i, l in enumerate(labels) if l == "brute_force")
-    result = explain_classifier(clf.model, feature_rows[attack_idx], FEATURE_NAMES)
-    print("Classifier-based explanation (brute_force example):")
-    print(" ", result["sentence"])
-
-    means, stds = fit_population_stats(feature_rows, FEATURE_NAMES)
-    result2 = explain_anomaly(feature_rows[attack_idx], means, stds)
-    print("\nFallback z-score explanation (same event, no classifier):")
-    print(" ", result2["sentence"])

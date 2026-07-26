@@ -609,3 +609,4 @@ if os.path.isdir(DASHBOARD_DIR):
         # Serves the dashboard shell. index.html itself redirects to /login
         # before rendering if the browser has no session token.
         return FileResponse(os.path.join(DASHBOARD_DIR, "index.html"))
+    # done

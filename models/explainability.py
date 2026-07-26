@@ -138,3 +138,4 @@ def fit_population_stats(feature_rows: list[dict], feature_names: list[str]):
     explain_anomaly()."""
     df = pd.DataFrame(feature_rows)[feature_names]
     return df.mean().to_dict(), df.std().replace(0, 1e-6).to_dict()
+# done

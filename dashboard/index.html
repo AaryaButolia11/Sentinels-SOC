@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sentinel · Behavioral Threat Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <!-- Charting for the risk-trend + severity-mix panels -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <!-- Auth guard: this is a protected page. If there's no session, bounce to
+         the login page BEFORE anything renders. (Remove this <script> block if
+         you want the dashboard to be reachable without signing in.) -->
+    <script>
+      if (!sessionStorage.getItem("sentinel_auth")) {
+        location.replace("/login");
+      }
+    </script>
+    <style>
+      /* --- additions for the new enrichment panels (scoped, non-invasive) --- */
+      .chart-wrap {
+        position: relative;
+        height: 240px;
+      }
+      .chart-wrap canvas {
+        max-height: 240px;
+      }
+      .metric.sev-critical {
+        border-left: 3px solid #ef4444;
+      }
+      .metric.sev-high {
+        border-left: 3px solid #f97316;
+      }
+      .metric.sev-medium {
+        border-left: 3px solid #f59e0b;
+      }
+      .metric.sev-low {
+        border-left: 3px solid #64748b;
+      }
+      /* sign-out button in the sidebar foot */
+      .logout-btn {
+        all: unset;
+        cursor: pointer;
+        text-align: center;
+        margin-top: 0.6rem;
+        padding: 0.5rem;
+        border-radius: 5px;
+        border: 1px solid var(--line-strong);
+        background: var(--paper);
+        color: var(--ink-dim);
+        font-size: 0.76rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        transition:
+          background 0.15s,
+          color 0.15s;
+      }
+      .logout-btn:hover {
+        background: var(--coral-soft);
+        color: var(--coral);
+      }
+      /* one-click response action on each threat card */
+      .remediate-btn {
+        all: unset;
+        cursor: pointer;
+        margin-right: 0.45rem;
+        padding: 0.32rem 0.62rem;
+        border-radius: 4px;
+        background: var(--coral);
+        color: #fff;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        transition:
+          background 0.15s,
+          opacity 0.15s;
+      }
+      .remediate-btn:hover {
+        background: #8f2018;
+      }
+      .remediate-btn.done {
+        background: var(--teal);
+        cursor: default;
+      }
+      .remediate-btn.err {
+        background: var(--amber);
+      }
+      .remediate-btn:disabled {
+        opacity: 0.9;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell" id="appShell">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="letterhead">Restricted · Internal Distribution</div>
+        <div class="brand">
+          <div class="brand-mark">S</div>
+          <div>
+            <h1>Sentinel</h1>
+            <p>Behavioral SOC Report</p>
+          </div>
+        </div>
+
+        <nav class="nav" id="nav">
+          <button data-view="overview" class="active">
+            <span class="ico">▦</span> Overview
+          </button>
+          <button data-view="investigation">
+            <span class="ico">◎</span> Investigation
+          </button>
+          <button data-view="copilot">
+            <span class="ico">✦</span> AI Copilot
+          </button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="link-status">
+            <span class="dot" id="wsDot"></span>
+            <span id="wsLabel">connecting…</span>
+          </div>
+          <button class="logout-btn" id="signoutBtn">Sign out</button>
+        </div>
+      </aside>
+
+      <!-- Main -->
+      <main class="main">
+        <!-- ===================== OVERVIEW ===================== -->
+        <section class="view active" id="view-overview">
+          <div class="topbar">
+            <div>
+              <div class="eyebrow">Behavioral anomaly detection</div>
+              <h2>Live Operations</h2>
+              <div class="sub">
+                Two-stage detection · unsupervised anomaly scoring → supervised
+                attack classification
+              </div>
+            </div>
+          </div>
+
+          <div class="metrics" id="metricsStrip">
+            <div class="metric threat">
+              <div class="label">Alerts raised</div>
+              <div class="value mono" id="mAlerts">–</div>
+              <div class="foot" id="mAlertRate">alert rate –</div>
+            </div>
+            <div class="metric">
+              <div class="label">Events processed</div>
+              <div class="value mono" id="mEvents">–</div>
+              <div class="foot">replayed through pipeline</div>
+            </div>
+            <div class="metric safe">
+              <div class="label">Macro F1</div>
+              <div class="value mono" id="mF1">–</div>
+              <div class="foot">held-out classifier</div>
+            </div>
+            <div class="metric">
+              <div class="label">Attack classes</div>
+              <div class="value mono" id="mClasses">5</div>
+              <div class="foot">
+                credential · brute · lateral · travel · spoof
+              </div>
+            </div>
+          </div>
+
+          <!-- NEW: severity summary strip (Critical / High / Medium / Low), real counts -->
+          <div class="metrics" id="severityStrip" style="margin-top: 0.9rem">
+            <div class="metric sev-critical">
+              <div class="label">Critical</div>
+              <div class="value mono" id="mSevCritical">–</div>
+              <div class="foot">page on-call</div>
+            </div>
+            <div class="metric sev-high">
+              <div class="label">High</div>
+              <div class="value mono" id="mSevHigh">–</div>
+              <div class="foot">investigate now</div>
+            </div>
+            <div class="metric sev-medium">
+              <div class="label">Medium</div>
+              <div class="value mono" id="mSevMedium">–</div>
+              <div class="foot">queue for review</div>
+            </div>
+            <div class="metric sev-low">
+              <div class="label">Low</div>
+              <div class="value mono" id="mSevLow">–</div>
+              <div class="foot">monitor</div>
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Network Attack Replay</h3>
+                <span class="tag">incoming threat arcs → SOC HQ</span>
+              </div>
+              <div class="map-wrap">
+                <canvas id="threatMap"></canvas>
+                <div class="map-legend" id="mapLegend"></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Live Alert Stream</h3>
+                <span class="tag" id="feedTag">exhibit log · live</span>
+              </div>
+              <ul class="feed" id="feed">
+                <li class="heartbeat">
+                  <div class="row1">
+                    <span class="who">Waiting for stream…</span>
+                  </div>
+                  <div class="why">
+                    Alerts appear here the moment the pipeline flags an event.
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="grid two-even" style="margin-top: 0.9rem">
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Per-class Recall</h3>
+                <span class="tag">held-out eval</span>
+              </div>
+              <div class="bars" id="recallBars">
+                <div class="spinner"></div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Model Health &amp; Drift</h3>
+                <span class="tag" id="driftTag">analyst feedback</span>
+              </div>
+              <div class="bars" id="driftPanel">
+                <div class="empty">
+                  No analyst feedback yet. Confirm or dismiss alerts to feed the
+                  drift monitor.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- NEW: risk-score trend chart + severity mix, both from real endpoints -->
+          <div class="grid two-even" style="margin-top: 0.9rem">
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Risk Score Trend</h3>
+                <span class="tag">last 40 alerts</span>
+              </div>
+              <div class="chart-wrap"><canvas id="riskTrend"></canvas></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Severity Mix</h3>
+                <span class="tag">risk × asset sensitivity</span>
+              </div>
+              <div class="chart-wrap"><canvas id="sevChart"></canvas></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== INVESTIGATION ===================== -->
+        <section class="view" id="view-investigation">
+          <div class="topbar">
+            <div>
+              <div class="eyebrow">Interactive investigation</div>
+              <h2>User Profile Inspector</h2>
+              <div class="sub">
+                Inspect the learned baseline the detector scores each event
+                against
+              </div>
+            </div>
+          </div>
+
+          <div class="search-row">
+            <input
+              id="userSearch"
+              placeholder="Enter a user id, e.g. user-049"
+            />
+            <button id="userSearchBtn">Investigate</button>
+          </div>
+          <div class="user-pills" id="userPills"></div>
+
+          <div id="investBody">
+            <div class="empty">
+              Search a user or pick one above to load their behavioral baseline,
+              alert history, and risk timeline.
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== COPILOT ===================== -->
+        <section class="view" id="view-copilot">
+          <div class="topbar">
+            <div>
+              <div class="eyebrow">AI security copilot</div>
+              <h2>Analyst Briefings</h2>
+              <div class="sub">
+                Grounded in each alert's own evidence · MITRE ATT&amp;CK mapping
+                &amp; response playbook
+              </div>
+            </div>
+            <span class="source-badge" id="copilotMode">checking…</span>
+          </div>
+
+          <div class="copilot-shell">
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Recent alerts</h3>
+                <span class="tag" id="copilotCount">–</span>
+              </div>
+              <div class="copilot-list" id="copilotList">
+                <div class="spinner"></div>
+              </div>
+            </div>
+            <div class="brief" id="briefBox">
+              <div class="empty">
+                Select an alert to generate an analyst briefing.
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+
+    <!-- Enhancement layer: populates the new panels from the upgraded backend.
+         Self-contained and read-only; only touches the new elements above, so it
+         never conflicts with app.js. Safe to remove if you fold this into app.js. -->
+    <script>
+      (function () {
+        const SEV = {
+          Critical: "#ef4444",
+          High: "#f97316",
+          Medium: "#f59e0b",
+          Low: "#64748b",
+        };
+        let trendChart = null,
+          sevChart = null;
+        const $ = (id) => document.getElementById(id);
+        async function j(url) {
+          const r = await fetch(url);
+          if (!r.ok) throw new Error(r.status);
+          return r.json();
+        }
+
+        async function updateSeverity() {
+          let sb = null;
+          try {
+            sb = (await j("/metrics")).severity_breakdown;
+          } catch (e) {}
+          if (!sb) {
+            try {
+              sb = (await j("/dashboard/overview")).severity_breakdown;
+            } catch (e) {}
+          }
+          if (!sb) return;
+          ["Critical", "High", "Medium", "Low"].forEach((k) => {
+            const el = $("mSev" + k);
+            if (el) el.textContent = sb[k] ?? 0;
+          });
+          const labels = ["Critical", "High", "Medium", "Low"];
+          const data = labels.map((k) => sb[k] ?? 0);
+          const cv = $("sevChart");
+          if (!cv || !window.Chart) return;
+          if (sevChart) {
+            sevChart.data.datasets[0].data = data;
+            sevChart.update();
+            return;
+          }
+          sevChart = new Chart(cv, {
+            type: "doughnut",
+            data: {
+              labels,
+              datasets: [
+                {
+                  data,
+                  backgroundColor: labels.map((k) => SEV[k]),
+                  borderWidth: 0,
+                },
+              ],
+            },
+            options: {
+              cutout: "62%",
+              plugins: {
+                legend: { position: "right", labels: { color: "#9aa3b8" } },
+              },
+            },
+          });
+        }
+
+        async function updateTrend() {
+          const cv = $("riskTrend");
+          if (!cv || !window.Chart) return;
+          let pts = [];
+          try {
+            pts = (await j("/dashboard/trend?limit=40")).points || [];
+          } catch (e) {
+            return;
+          }
+          const labels = pts.map((p) => p.t);
+          const risk = pts.map((p) => p.risk);
+          const avg = pts.map((p) => p.risk_avg);
+          if (trendChart) {
+            trendChart.data.labels = labels;
+            trendChart.data.datasets[0].data = risk;
+            trendChart.data.datasets[1].data = avg;
+            trendChart.update();
+            return;
+          }
+          trendChart = new Chart(cv, {
+            type: "line",
+            data: {
+              labels,
+              datasets: [
+                {
+                  label: "Risk",
+                  data: risk,
+                  borderColor: "#fb7185",
+                  backgroundColor: "rgba(251,113,133,0.12)",
+                  fill: true,
+                  tension: 0.3,
+                  pointRadius: 0,
+                },
+                {
+                  label: "5-pt avg",
+                  data: avg,
+                  borderColor: "#22d3ee",
+                  borderDash: [5, 5],
+                  tension: 0.3,
+                  pointRadius: 0,
+                },
+              ],
+            },
+            options: {
+              scales: {
+                y: {
+                  min: 0,
+                  max: 1,
+                  ticks: { color: "#9aa3b8" },
+                  grid: { color: "rgba(255,255,255,0.06)" },
+                },
+                x: {
+                  ticks: { color: "#9aa3b8", maxTicksLimit: 8 },
+                  grid: { display: false },
+                },
+              },
+              plugins: { legend: { labels: { color: "#9aa3b8" } } },
+            },
+          });
+        }
+
+        async function tick() {
+          await Promise.allSettled([updateSeverity(), updateTrend()]);
+        }
+        function start() {
+          tick();
+          setInterval(tick, 4000);
+        }
+        if (document.readyState !== "loading") start();
+        else document.addEventListener("DOMContentLoaded", start);
+      })();
+    </script>
+  </body>
+</html>

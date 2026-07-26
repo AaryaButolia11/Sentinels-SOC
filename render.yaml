@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: soc-anomaly-detection
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan:
+      starter # free tier's spin-down-on-idle will retrain from
+      # scratch on every wake-up (slow) — starter avoids that
+    healthCheckPath: /health
+    region: oregon
+    autoDeploy: true
+    numInstances:
+      1 # IMPORTANT: keep at 1 — SQLite is per-instance and
+      # gets wiped/rebuilt on boot; scaling out would give
+      # each replica a different, diverging dataset
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: SOC_DATABASE_URL
+        fromDatabase:
+          name: soc-db
+          property: connectionString
+
+databases:
+  - name: soc-db
+    plan: free # Render's free Postgres: 1GB storage, fine for this demo
+    region:
+      oregon # keep the same region as the web service above for
+      # lowest latency + free internal networking

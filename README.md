@@ -1,146 +1,415 @@
-# Sentinel — AI-Powered Behavioral Anomaly Detection
+# Sentinel AI — Behavioral Anomaly Detection for Cybersecurity
 
-A behavioral (not signature-based) threat detection system for access logs. It
-learns what "normal" looks like per user and per device, scores every event for
-anomaly risk, classifies the ones that look like attacks, explains _why_ it
-flagged them, and streams the results to a live analyst console.
+> An AI/ML-powered **behavioral anomaly detection** platform that learns normal user &
+> device access patterns and detects cyber threats in real time — instead of relying on
+> static signatures. Built for the **Honeywell Campus Connect** project submission.
 
-## What's implemented
+**Live Prototype:** https://sentinels-soc.onrender.com/
+**Repository:** https://github.com/AaryaButolia11/Sentinels-SOC
 
-| Capability                                                             | Where                                         |
-| ---------------------------------------------------------------------- | --------------------------------------------- |
-| Synthetic log generator (5 attack types + normal traffic)              | `data/generate_logs.py`                       |
-| Real-time log streaming (WebSocket replay of a held-out slice)         | `api/main.py` + `api/routes/stream.py`        |
-| Behavioral profile engine (online per-user/device baselines)           | `features/user_profiles.py`                   |
-| Cold-start handling (Bayesian shrinkage to a population prior)         | `features/cold_start.py`                      |
-| Isolation Forest anomaly scoring (stage 1, unsupervised)               | `models/anomaly_model.py`                     |
-| Class-imbalance handling (inverse-freq weights + targeted SMOTE)       | `models/imbalance.py`                         |
-| Attack classification (stage 2, LightGBM, 5 classes)                   | `models/classifier.py`                        |
-| Risk scoring 0-100                                                     | anomaly score x 100, surfaced across API + UI |
-| Explainable AI (SHAP -> one-sentence rationale, with z-score fallback) | `models/explainability.py`                    |
-| Concept-drift monitoring (rolling + windowed FP-rate)                  | `models/drift_monitor.py`                     |
-| **AI Security Copilot** (LLM briefings + MITRE mapping + playbook)     | `api/routes/copilot.py`                       |
-| **Interactive investigation page** (per-user baseline inspector)       | `api/routes/investigation.py` + dashboard     |
-| **Animated network attack replay** (canvas geo-arc map)                | `dashboard/app.js`                            |
-| Analyst dashboard (metrics, live feed, eval, drift)                    | `dashboard/`                                  |
+`UEBA` · `SOC` · `Anomaly Detection` · `MITRE ATT&CK` · `Explainable AI (SHAP)` ·
+`Isolation Forest` · `LightGBM` · `Concept-Drift Monitoring` · `Real-Time WebSocket Streaming` · `FastAPI`
 
-## Architecture: a two-stage detector
+---
+
+## Table of Contents
+
+1. [Problem Statement](#1-problem-statement)
+2. [Solution Overview](#2-solution-overview)
+3. [Key Features](#3-key-features)
+4. [Problem-Statement Coverage](#4-problem-statement-coverage)
+5. [Technical Approach](#5-technical-approach)
+6. [Project Workflow](#6-project-workflow)
+7. [System Design & Architecture](#7-system-design--architecture)
+8. [Technology Stack](#8-technology-stack)
+9. [API Endpoints](#9-api-endpoints)
+10. [Results & Metrics](#10-results--metrics)
+11. [Requirements](#11-requirements)
+12. [Installation & Steps to Run](#12-installation--steps-to-run)
+13. [Using the Dashboard](#13-using-the-dashboard)
+14. [Project Structure](#14-project-structure)
+15. [Limitations & Notes](#15-limitations--notes)
+16. [Future Work](#16-future-work)
+17. [Author](#17-author)
+
+---
+
+## 1. Problem Statement
+
+Modern enterprises generate thousands of authentication and access events every minute
+across cloud platforms, VPNs, identity providers, and endpoint devices. Traditional
+security tools rely on **predefined signatures and static rules**, which makes them
+ineffective against evolving threats such as insider attacks, credential misuse, lateral
+movement, device spoofing, and zero-day behavior.
+
+Security teams need an intelligent, **behavior-driven** system that learns what "normal"
+looks like for each user and device, detects deviations in real time, explains its
+reasoning to reduce false positives, and accelerates incident response.
+
+---
+
+## 2. Solution Overview
+
+**Sentinel AI** is a **User & Entity Behavior Analytics (UEBA)** platform. It ingests
+access logs, builds a personalized behavioral baseline for every user, and runs a
+**two-stage detection pipeline**:
+
+- **Stage 1 — Unsupervised anomaly scoring** (Isolation Forest): assigns every event a
+  calibrated `0–1` risk score and can catch novel, never-before-labeled patterns.
+- **Stage 2 — Supervised attack classification** (LightGBM): categorizes confirmed
+  anomalies into one of five known attack types.
+
+Every alert is then **enriched** with a severity rating, a **MITRE ATT&CK** technique
+mapping, a **SHAP-based plain-English explanation**, and a **ranked response playbook**,
+before being streamed live to an interactive **SOC dashboard**.
+
+---
+
+## 3. Key Features
+
+- **Behavioral (non-signature) detection** — learns per-user, per-device baselines.
+- **16 engineered behavioral features** across temporal, geographical, device,
+  credential, and resource-access dimensions.
+- **Two-stage AI pipeline** — unsupervised anomaly detection + supervised classification.
+- **Five attack types detected** — Credential Misuse, Brute Force, Lateral Movement,
+  Impossible Travel, Device Spoofing.
+- **Explainable AI (SHAP)** — human-readable reason for every alert.
+- **Alert enrichment** — severity scoring, MITRE ATT&CK mapping, recommended actions.
+- **Class-imbalance handling** — inverse-frequency class weighting + SMOTE.
+- **Concept-drift monitoring** — rolling + windowed (ADWIN-style) drift detection with a
+  live "retraining recommended" signal.
+- **Cold-start handling** — per-feature Bayesian shrinkage blends user history with a
+  population prior.
+- **Real-time streaming** — WebSocket alert broadcast + stateful replay engine.
+- **Interactive SOC dashboard** — live metrics, threat map, alert feed, risk radar,
+  investigation view, and an analyst feedback loop.
+- **Synthetic data generator** — configurable enterprise logs with injected labeled attacks.
+
+---
+
+## 4. Problem-Statement Coverage
+
+| Requirement | Status | Implementation |
+|---|:---:|---|
+| AI/ML behavioral detection (not signature-based) | ✅ | Isolation Forest + LightGBM over per-user baselines |
+| Generate synthetic access logs | ✅ | `data/generate_logs.py` attack-injection engine |
+| Detect credential misuse | ✅ | Classifier → MITRE T1078 |
+| Detect brute-force attacks | ✅ | Classifier → MITRE T1110 |
+| Detect lateral movement | ✅ | Classifier → MITRE T1021 |
+| Detect impossible travel | ✅ | Geo-velocity feature + classifier |
+| Detect device spoofing | ✅ | New-device features + classifier → MITRE T1036 |
+| Address class imbalance | ✅ | `models/imbalance.py` (class weighting + SMOTE) |
+| Address concept drift | ✅ | `models/drift_monitor.py` (rolling + windowed) |
+| Address cold-start | ✅ | `features/cold_start.py` (Bayesian shrinkage) |
+| Classify attack types | ✅ | LightGBM, 5 classes |
+| Explainable risk scores | ✅ | `models/explainability.py` (SHAP + fallback) |
+| Analyst dashboard | ✅ | `dashboard/` SOC console + investigation view |
+| Detection accuracy / low FP / classification / design | ✅ | ROC-AUC 0.9855, low FP rate, 100% macro classification |
+
+---
+
+## 5. Technical Approach
+
+### Behavioral Feature Engineering
+16 features are computed **per event, before** that event is folded into the user's
+baseline — preventing an event from "seeing itself" (no data leakage). Dimensions:
+
+- **Temporal:** hour of day, hour typicality, seconds since last event
+- **Geographical:** distance from home (km), geo-velocity (km/h — impossible-travel
+  signal), new-country flag
+- **Device:** is-new-device flag, device familiarity
+- **Credential / Auth:** auth-failed flag, failed attempts in last 5 min,
+  privilege-escalation action flag
+- **Resource / Behavior:** resource sensitivity, resource familiarity, session duration,
+  session-duration deviation, baseline confidence
+
+### Two-Stage Detection
+- **Stage 1 (unsupervised):** Isolation Forest, StandardScaler-normalized, calibrated to a
+  stable `0–1` risk range. Designed as an **extensible ensemble** (a reconstruction-error
+  autoencoder path is included behind the same interface for future expansion).
+- **Stage 2 (supervised):** LightGBM (with a scikit-learn Gradient Boosting fallback),
+  runs only on flagged events, emitting a predicted attack label + confidence.
+
+### Robustness Concerns
+- **Class imbalance:** inverse-frequency class weighting (always on) + SMOTE oversampling
+  on the training split only.
+- **Cold-start:** per-feature Bayesian shrinkage / credibility weighting.
+- **Concept drift:** rolling false-positive rate + ADWIN-style windowed comparison; raises
+  a retraining recommendation when drift is detected.
+
+### Explainability & Enrichment
+- **SHAP** TreeExplainer over the classifier, with a z-score-style fallback for novel
+  anomalies — both produce a short, analyst-readable sentence.
+- **Enrichment:** severity (risk × asset sensitivity), MITRE ATT&CK technique/tactic, and
+  a ranked response playbook (e.g., Block IP, Require MFA, Isolate host).
+
+---
+
+## 6. Project Workflow
+
+1. **Data Ingestion** — collect access events (timestamp, user, device, IP, geo, resource,
+   auth result); synthetic logs generated by `generate_logs.py`.
+2. **Parsing & Preprocessing** — type-clean events and stream them in strict time order.
+3. **Feature Engineering** — compute 16 behavioral features per event (before baseline update).
+4. **Baseline / Profile Building** — update each user's rolling behavioral profile.
+5. **Cold-Start Blending** — blend thin user history with a population prior via Bayesian shrinkage.
+6. **Stage 1 — Anomaly Scoring** — Isolation Forest assigns a calibrated `0–1` risk score.
+7. **Stage 2 — Attack Classification** — LightGBM labels suspicious events as one of five attack types.
+8. **Explainability (SHAP)** — generate a plain-English reason + top contributing features.
+9. **Alert Enrichment** — attach severity, MITRE ATT&CK mapping, and recommended actions.
+10. **Persistence & Streaming** — store in SQLite; broadcast the alert over WebSocket in real time.
+11. **SOC Dashboard** — analysts monitor live metrics, threat map, alert feed, and investigation view.
+12. **Feedback & Drift Monitoring** — analyst verdicts feed the drift monitor, closing the learning loop.
+
+*(Steps 1–5 are shared by training and live scoring; 6–9 are the detection core; 10–12 are the real-time & feedback layer.)*
+
+---
+
+## 7. System Design & Architecture
 
 ```
-event -> feature engineering -> [Stage 1] Isolation Forest anomaly score
-                                     |
-                          score >= threshold?
-                                     | yes
-                                     v
-                        [Stage 2] LightGBM attack classifier -> SHAP explanation -> Alert
+                    ┌──────────────────────────────────────────────────────────┐
+                    │                     SENTINEL AI PIPELINE                   │
+                    └──────────────────────────────────────────────────────────┘
+
+  Access Logs ──▶ Feature Engineering ──▶ Stage 1: Anomaly Scoring (Isolation Forest)
+ (synthetic /        (16 features,               │  risk score 0–1
+  real)              cold-start blended)         ▼
+                                          suspicious?  ──no──▶ (routine, not alerted)
+                                                │ yes
+                                                ▼
+                                   Stage 2: Attack Classification (LightGBM)
+                                                │  predicted type + confidence
+                                                ▼
+                                   Explainability (SHAP) + Enrichment
+                                   (severity · MITRE ATT&CK · response playbook)
+                                                │
+                          ┌─────────────────────┼─────────────────────┐
+                          ▼                     ▼                     ▼
+                   SQLite (persist)     WebSocket broadcast     Drift Monitor
+                                                │                     ▲
+                                                ▼                     │ analyst verdicts
+                                        SOC Dashboard ────────────────┘
+                                 (metrics · threat map · feed · radar ·
+                                  investigation view · feedback loop)
 ```
 
-Stage 1 is unsupervised, so it works from day one and can flag _novel_ patterns
-it was never trained on. Stage 2 only runs on already-suspicious events and
-answers "which known attack type is this?". This keeps the rare-attack /
-dominant-normal imbalance out of the classifier entirely -- "normal" is handled
-by the threshold, not a class.
+A single `Pipeline.process(event)` call powers **both** batch training and live scoring,
+so the FastAPI backend and the replay simulator share identical logic.
 
-The **ordering rule** matters throughout: features for an event are always
-computed _before_ the event is folded into its own baseline, so an event never
-"sees itself" and smooths away its own anomaly. `build_feature_table()` and
-`Pipeline.process()` both enforce this.
+---
 
-## Project structure
+## 8. Technology Stack
 
-```
-sentinel/
-|-- api/
-|   |-- main.py                 # FastAPI app, lifespan training, WS replay loop
-|   |-- state.py                # shared handle to the trained pipeline
-|   |-- db/
-|   |   |-- init_db.py          # engine / SessionLocal / get_db / init_db
-|   |   `-- models.py           # Event, Alert, Feedback tables
-|   `-- routes/
-|       |-- alerts.py           # GET /alerts, /alerts/{id}
-|       |-- feedback.py         # POST /feedback  -> drift monitor
-|       |-- stream.py           # WS /ws/alerts
-|       |-- users.py            # GET /users
-|       |-- copilot.py          # POST /copilot   (AI Security Copilot)
-|       `-- investigation.py    # GET /investigate/{user_id}
-|-- dashboard/                  # vanilla JS SPA (no build step)
-|   `-- index.html, app.js, styles.css
-|-- data/                       # generator, schema, sample_logs.csv
-|-- features/                   # profiles, cold start, feature engineering
-|-- models/                     # anomaly, classifier, imbalance, explainability, drift
-|-- streaming/pipeline.py       # per-event orchestration
-|-- conftest.py, sitecustomize.py, requirements.txt
-`-- tests/
-```
+| Layer | Technologies |
+|---|---|
+| Languages | Python (backend & ML), JavaScript (dashboard) |
+| Backend & API | FastAPI, REST endpoints, WebSocket streaming, Pydantic schemas |
+| Machine Learning | scikit-learn, Isolation Forest, LightGBM, SHAP, SMOTE (imbalanced-learn) |
+| Data | Pandas, NumPy |
+| Persistence | SQLite via SQLAlchemy (Events, Alerts, Feedback) |
+| Frontend | Single-page SOC console — vanilla JavaScript + Chart.js, live WebSocket updates |
+| Server | Uvicorn (ASGI); hosted prototype on Render |
 
-## Quick start
+---
+
+## 9. API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/auth/admin/login` | Admin login; clears tables and starts the live replay |
+| `POST` | `/replay/start` | Manually (re)start the pre-scored replay stream |
+| `GET`  | `/replay/status` | Current replay progress/stats |
+| `GET`  | `/health` | Liveness + pipeline-ready check |
+| `GET`  | `/metrics` | Model readiness, per-class scores, alert rate, FP rate, AI confidence |
+| `GET`  | `/alerts` | List recent alerts (optional `user_id` filter) |
+| `GET`  | `/alerts/{alert_id}` | Full alert detail incl. explanation + linked event |
+| `POST` | `/feedback` | Submit analyst verdict (`confirmed` / `false_positive`) |
+| `GET`  | `/feedback/drift-status` | Current drift status + retraining recommendation |
+| `WS`   | `/ws/alerts` | WebSocket stream of new alerts as they are raised |
+| `GET`  | `/users` | List users |
+| `GET`  | `/dashboard/overview` | Timeline, threat map nodes, risk radar, classification, alerts |
+| `GET`  | `/dashboard/trend` | Rolling risk-trend points |
+| `GET`  | `/dashboard/attack-replay` | Geo attack arcs for the threat map |
+
+---
+
+## 10. Results & Metrics
+
+Evaluated on a synthetic enterprise dataset of **20,351 events** (19,200 normal + 1,151
+labeled attacks across five categories).
+
+### Stage 1 — Behavioral Anomaly Detection
+| Metric | Value |
+|---|:---:|
+| ROC-AUC | **0.9855** |
+| Precision | **87.1%** |
+| Recall | **76.3%** |
+| F1-Score | **81.3%** |
+
+Confusion matrix — TN: 19,070 · FP: 130 · FN: 273 · TP: 878 (low false-positive rate).
+
+### Stage 2 — Attack Classification
+| Metric | Value |
+|---|:---:|
+| Macro Precision | **100%** |
+| Macro Recall | **100%** |
+| Macro F1-Score | **100%** |
+
+### End-to-End Replay (4,071 events replayed as a live stream)
+| Attack Type | Detected / Total | Rate |
+|---|:---:|:---:|
+| Brute Force | 128 / 128 | 100% |
+| Credential Misuse | 9 / 9 | 100% |
+| Device Spoofing | 6 / 6 | 100% |
+| Impossible Travel | 8 / 16 | 50% |
+| Lateral Movement | 15 / 72 | 20.8% |
+| **Overall end-to-end recall** | **166 / 231** | **71.9%** |
+
+> **Note:** All metrics are on a synthetically generated dataset with injected attacks.
+> They validate the correctness and effectiveness of the architecture and are not
+> production-level results on real-world traffic.
+
+---
+
+## 11. Requirements
+
+- **Python 3.10+**
+- Core dependencies (see `requirements.txt`):
+  - `fastapi`, `uvicorn[standard]`, `websockets`
+  - `sqlalchemy`, `pydantic`
+  - `scikit-learn`, `pandas`, `numpy`, `lightgbm`, `imbalanced-learn`, `shap`
+  - `Faker` (dataset generation), `pytest`, `httpx` (tests)
+
+---
+
+## 12. Installation & Steps to Run
 
 ```bash
+# 1. Clone the repository
+git clone https://github.com/AaryaButolia11/Sentinels-SOC.git
+cd Sentinels-SOC
+
+# 2. (Recommended) create and activate a virtual environment
+python -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# (Optional) regenerate data -- all 5 attack types, realistically imbalanced
-python data/generate_logs.py --users 120 --days 21 \
-    --events_per_user_per_day 6 --attack_prob 0.14 --seed 7 \
-    --out data/sample_logs.csv
+# 4. Generate synthetic access logs
+python data/generate_logs.py --users 60 --days 14 \
+       --events_per_user_per_day 8 --out data/sample_logs.csv
 
-python -m pytest -q                 # 14 tests
+# 5. (Optional) run the test suite
+python -m pytest -q
 
+# 6. Start the API + dashboard server
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
-# open http://127.0.0.1:8000/
+
+# 7. Open the dashboard in your browser
+#    http://127.0.0.1:8000/
 ```
 
-On startup the API trains on the first 80% of the log ("historical") and replays
-the last 20% as a live WebSocket stream, so the dashboard populates on its own.
+**Data generator options** (`data/generate_logs.py`):
 
-### AI Security Copilot
+| Flag | Default | Description |
+|---|:---:|---|
+| `--users` | 60 | Number of simulated users |
+| `--days` | 14 | Days of activity to simulate |
+| `--events_per_user_per_day` | 8 | Average events per user per day |
+| `--attack_prob` | 0.03 | Probability of injecting an attack |
+| `--seed` | 42 | Random seed for reproducibility |
+| `--out` | `sample_logs.csv` | Output CSV path |
 
-The Copilot turns an alert into an analyst briefing: situation summary, MITRE
-ATT&CK technique, severity, a prioritized response playbook, and a hunt pivot.
+---
 
-- **Offline (default):** a per-attack-type playbook grounded in the alert's own
-  evidence. No external calls -- works in CI and air-gapped demos.
-- **Live LLM:** provide a `GROQ_API_KEY` and the Copilot calls Groq's free
-  OpenAI-compatible Chat Completions API with a defensive-SOC prompt built only
-  from the structured alert. Any failure falls back to the playbook, and the UI
-  labels which path produced the text. Groq's free tier needs no credit card --
-  grab a key at [console.groq.com](https://console.groq.com).
+## 13. Using the Dashboard
 
-Copy `.env.example` to `.env` and drop your key in — the app auto-loads `.env`
-on startup, so no extra flags are needed:
+1. Open **http://127.0.0.1:8000/** (or the live URL).
+2. Sign in with the **demo admin credentials**:
+   - **Username:** `admin`
+   - **Password:** `admin123`
+3. Logging in clears the tables and streams the pre-scored held-out events as a
+   **simulated live feed**. Alerts, the threat map, and charts populate within seconds.
+4. Explore: live metrics strip, geographical threat map, live alert feed (with severity,
+   MITRE technique, explanation, recommended actions), risk radar, risk-trend and
+   severity-mix charts, and the **investigation view** for per-user drill-down.
+5. Mark alerts **confirmed** or **false-positive** — verdicts feed the drift monitor and
+   can trigger a "retraining recommended" banner.
 
-```dotenv
-GROQ_API_KEY=gsk_your_actual_key_here
-# SOC_COPILOT_MODEL=llama-3.3-70b-versatile        # optional (this is the default)
-# GROQ_BASE_URL=https://api.groq.com/openai/v1     # optional
+---
+
+## 14. Project Structure
+
+```text
+Sentinels-SOC/
+├── api/
+│   ├── main.py                 # FastAPI entrypoint: train, replay, endpoints
+│   ├── db/
+│   │   ├── init_db.py
+│   │   └── models.py           # SQLAlchemy models: Event, Alert, Feedback
+│   └── routes/
+│       ├── alerts.py           # GET /alerts, /alerts/{id}
+│       ├── feedback.py         # POST /feedback, GET /feedback/drift-status
+│       ├── stream.py           # WS /ws/alerts
+│       └── users.py            # GET /users
+├── dashboard/
+│   ├── index.html              # SOC console (vanilla JS + Chart.js)
+│   ├── app.js
+│   └── styles.css
+├── data/
+│   ├── generate_logs.py        # Synthetic log + attack-injection engine
+│   ├── schemas.py
+│   └── sample_logs.csv
+├── features/
+│   ├── feature_engineering.py  # 16 behavioral features
+│   ├── user_profiles.py        # Rolling per-user baselines
+│   └── cold_start.py           # Bayesian-shrinkage cold-start blending
+├── models/
+│   ├── anomaly_model.py        # Stage 1: Isolation Forest scorer
+│   ├── classifier.py           # Stage 2: LightGBM attack classifier
+│   ├── imbalance.py            # Class weighting + SMOTE
+│   ├── explainability.py       # SHAP + fallback explanations
+│   ├── drift_monitor.py        # Concept-drift detection
+│   └── enrichment.py           # Severity + MITRE ATT&CK + response playbooks
+├── streaming/
+│   └── pipeline.py             # Orchestrates the full per-event flow
+├── requirements.txt
+└── tests/
 ```
 
-Verify it loaded by opening `http://127.0.0.1:8000/copilot/health` — you should
-see `"llm_available": true`. Because Groq is OpenAI-compatible, pointing
-`GROQ_BASE_URL` (and the key/model) at any other OpenAI-style endpoint — a local
-Ollama/vLLM server, OpenRouter, etc. — works without code changes.
+---
 
-## A note on evaluation honesty
+## 15. Limitations & Notes
 
-On the synthetic data the classifier scores near-perfect macro F1. That's
-expected and **not** a claim of real-world accuracy: the injected attacks have
-deliberately distinct feature signatures, so the supervised stage separates them
-easily. The parts that transfer to real data are the _design_ choices -- the
-two-stage split, cold-start shrinkage, imbalance handling, the ordering rule,
-and drift monitoring -- not the headline number. The more informative signal is
-that the **unsupervised** stage alone already separates every attack type's mean
-risk (0.45-0.75) from normal traffic (~0.17) with no labels at all.
+- **Real-time** is demonstrated via a **stateful replay** of held-out data (a simulated
+  live stream with correct time-ordered, no-look-ahead scoring) — not production traffic.
+- **Metrics** are computed on a **synthetic** dataset with injected attacks; treat them as
+  architecture validation, not real-world performance.
+- **Scalability** is prototype-level: SQLite persistence and a single-process WebSocket
+  pub/sub (swap for Postgres/Redis for multi-worker deployments).
+- **Anomaly stage** currently runs **Isolation Forest**; the module is structured as an
+  extensible ensemble (an autoencoder path is included but disabled by default).
+- The system uses **16 behavioral features** (defined in `feature_engineering.py`).
 
-## Key API endpoints
+---
 
-```
-GET  /health                     pipeline readiness
-GET  /metrics                    held-out P/R/F1 + live counters
-GET  /alerts                     recent alerts (filter by ?user_id=)
-POST /feedback                   analyst verdict -> drift status
-GET  /feedback/drift-status      current drift signal
-GET  /investigate/{user_id}      baseline + alerts + risk timeline
-GET  /investigate/users          browsable user list
-POST /copilot                    analyst briefing for an alert
-GET  /dashboard/attack-replay    geo arcs for the animated map
-WS   /ws/alerts                  live alert + heartbeat stream
-```
+## 16. Future Work
+
+- Ingest **real enterprise logs** from identity providers, VPNs, cloud, and SIEM/SOAR.
+- Enable the **autoencoder ensemble** path and add more unsupervised detectors.
+- Improve detection of subtle attacks (e.g., **lateral movement**) with sequence models.
+- Production hardening: Postgres/Redis, containerized deployment, role-based access.
+- Automated **retraining pipeline** triggered by drift signals.
+
+---
+
+## 17. Author
+
+**Aarya Butolia**
+Honeywell Campus Connect — Candidate ID 20509197
+Email: aaryabutolia@gmail.com
+
+- Live Prototype: https://sentinels-soc.onrender.com/
+- GitHub: https://github.com/AaryaButolia11/Sentinels-SOC

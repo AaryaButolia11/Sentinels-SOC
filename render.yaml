@@ -21,6 +21,16 @@ services:
           name: soc-db
           property: connectionString
 
+  # Dashboard hosted as its own static site, separate from the API.
+  # No build step: dashboard/ is plain HTML/CSS/JS, so buildCommand is a no-op.
+  - type: web
+    name: soc-dashboard
+    runtime: static
+    rootDir: dashboard
+    buildCommand: "echo 'no build step'"
+    staticPublishPath: .
+    autoDeploy: true
+
 databases:
   - name: soc-db
     plan: free # Render's free Postgres: 1GB storage, fine for this demo

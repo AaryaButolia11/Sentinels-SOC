@@ -22,6 +22,7 @@ Run with:  uvicorn api.main:app --host 127.0.0.1 --port 8000
 from __future__ import annotations
 import asyncio
 import csv
+import mimetypes
 import os
 import sys
 import time
@@ -34,6 +35,14 @@ from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
+
+# The slim Docker base image ships an incomplete /etc/mime.types, which
+# Python's mimetypes module reads from on Linux. Without this, StaticFiles
+# guesses "text/plain" for .css/.js and browsers refuse to apply/execute
+# them (strict MIME checking). Registering these explicitly bypasses the
+# broken system file entirely.
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("application/javascript", ".js")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "features"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "models"))

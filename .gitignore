@@ -1,5 +1,8 @@
+venv/
 __pycache__/
+**/__pycache__/
 *.pyc
-api/db/soc.db
 .pytest_cache/
 .env
+*.db
+soc.db

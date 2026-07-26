@@ -110,8 +110,12 @@ const state = {
 };
 
 async function getJson(url, opts) {
-  const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+  // Dashboard and API are two separate Render services now, so every
+  // relative call (e.g. "/metrics") needs the backend's full URL prefixed.
+  // Absolute URLs (already starting with http) pass through unchanged.
+  const full = url.startsWith("http") ? url : `${window.API_BASE}${url}`;
+  const r = await fetch(full, opts);
+  if (!r.ok) throw new Error(`${full} -> ${r.status}`);
   return r.json();
 }
 const fmtPct = (v) => `${((v || 0) * 100).toFixed(1)}%`;
@@ -238,10 +242,13 @@ async function loadDrift() {
 function connectWs() {
   const dot = document.getElementById("wsDot");
   const label = document.getElementById("wsLabel");
-  const proto = location.protocol === "https:" ? "wss" : "ws";
+  // Connect to the backend's host, not this page's own host — the
+  // dashboard and API are separate Render services.
+  const apiUrl = new URL(window.API_BASE);
+  const proto = apiUrl.protocol === "https:" ? "wss" : "ws";
   let ws;
   try {
-    ws = new WebSocket(`${proto}://${location.host}/ws/alerts`);
+    ws = new WebSocket(`${proto}://${apiUrl.host}/ws/alerts`);
   } catch (e) {
     dot.className = "dot offline";
     label.textContent = "offline";

@@ -10,7 +10,14 @@
       href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/styles.css" />
+    <!-- Backend API base URL. This site (dashboard) and the API are deployed
+         as two separate Render services, so every API/WebSocket call needs
+         the full backend URL — update this one line if the API service is
+         ever renamed or redeployed elsewhere. -->
+    <script>
+      window.API_BASE = "https://sentinels-soc-api.onrender.com";
+    </script>
     <!-- Charting for the risk-trend + severity-mix panels -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <!-- Auth guard: this is a protected page. If there's no session, bounce to
@@ -330,7 +337,7 @@
       </main>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/app.js"></script>
 
     <!-- Enhancement layer: populates the new panels from the upgraded backend.
          Self-contained and read-only; only touches the new elements above, so it
@@ -355,11 +362,12 @@
         async function updateSeverity() {
           let sb = null;
           try {
-            sb = (await j("/metrics")).severity_breakdown;
+            sb = (await j(`${window.API_BASE}/metrics`)).severity_breakdown;
           } catch (e) {}
           if (!sb) {
             try {
-              sb = (await j("/dashboard/overview")).severity_breakdown;
+              sb = (await j(`${window.API_BASE}/dashboard/overview`))
+                .severity_breakdown;
             } catch (e) {}
           }
           if (!sb) return;
@@ -402,7 +410,9 @@
           if (!cv || !window.Chart) return;
           let pts = [];
           try {
-            pts = (await j("/dashboard/trend?limit=40")).points || [];
+            pts =
+              (await j(`${window.API_BASE}/dashboard/trend?limit=40`)).points ||
+              [];
           } catch (e) {
             return;
           }

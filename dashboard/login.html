@@ -11,7 +11,14 @@
       rel="stylesheet"
     />
     <!-- Shared design tokens (paper palette, fonts, accents) -->
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/styles.css" />
+    <!-- Backend API base URL. This site (dashboard) and the API are deployed
+         as two separate Render services, so every API/WebSocket call needs
+         the full backend URL — update this one line if the API service is
+         ever renamed or redeployed elsewhere. -->
+    <script>
+      window.API_BASE = "https://sentinels-soc-api.onrender.com";
+    </script>
     <style>
       /* ------------------------------------------------------------------
          Login page — the "cover sheet" of a restricted dossier.
@@ -344,7 +351,7 @@
           status.className = "status";
           status.textContent = "Verifying credentials…";
           try {
-            const r = await fetch("/auth/admin/login", {
+            const r = await fetch(`${window.API_BASE}/auth/admin/login`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ username, password }),
